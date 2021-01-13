@@ -35,16 +35,6 @@ struct Request {
     uint8_t code;
     uint32_t size;
     std::string paylod;
-
-    //template<typename Archive>
-    //void serialize(Archive& ar, const unsigned int version)
-    //{
-    //    ar & clientId;
-    //    ar & version_;
-    //    ar & code;
-    //    ar & size;
-    //    ar & paylod;
-    //}
 };
 struct Response {
     int8_t version;
@@ -69,7 +59,7 @@ int main(int argc, char* argv[])
             {
                 // Get host
                 getline(serverfile, host, ':');
-                cout << host << endl;
+                cout << host << ":";
 
                 if (serverfile.good())
                 {
@@ -90,19 +80,18 @@ int main(int argc, char* argv[])
         tcp::resolver resolver(io_context);
         boost::asio::connect(s, resolver.resolve(host.c_str(), port.c_str()));
 
-        char user[max_user_length];// = new char[max_user_length];
-        char* message = new char[max_length];
-        char* uid = new char[16];// {'0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'};
+        char user[max_user_length];
+        char message[max_length];
         boost::uuids::uuid uuid;
+        string userName;
+        string uuid_str;
         string action;
         boost::filesystem::path userfile("me.info");
         ofstream myfile;
+        ifstream myfile_i;
         Request request;
         size_t request_length;
         Response response;
-        //std::string outbound_data_;
-        //std::ostringstream archive_stream;
-        //boost::archive::binary_oarchive archive(archive_stream);
         std::vector<boost::asio::const_buffer> buffers;
 
         // Get instructions from user
@@ -142,6 +131,14 @@ int main(int argc, char* argv[])
                         // Check wether user is already registered
                         if (boost::filesystem::exists(userfile)){
                             std::cout << "You are already registered." << std::endl;
+                            // If not the same run that registered - get uuid from file
+                            if (uuid.is_nil()) {
+                                myfile_i.open("me.info");
+                                std::getline(myfile_i, userName);
+                                std::getline(myfile_i, uuid_str);
+                                myfile_i.close();
+                                memcpy_s(&uuid, 16, uuid_str.c_str(), 16);
+                            }
                             break;
                         }
 
@@ -161,7 +158,6 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(user, strlen(user)));
                         boost::asio::write(s, buffers);
                         
-                        //boost::asio::write(s, boost::asio::buffer(&request, sizeof(request)));
                         boost::asio::read(s, boost::asio::buffer(&response, 24));
 
                         if (response.code == 1000) {
@@ -188,6 +184,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         boost::asio::write(s, buffers);
+                        boost::asio::read(s, boost::asio::buffer(&response, max_length));
 
                         break;
 
