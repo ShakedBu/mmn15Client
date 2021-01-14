@@ -17,6 +17,7 @@ using boost::asio::ip::tcp;
 enum {
     max_length = 1024,
     max_user_length = 255,
+    user_id_length = 16,
 };
 enum Action {
     Exit = 0,
@@ -30,7 +31,7 @@ enum Action {
     SendKey = 52
 };
 struct Request {
-    char clientId[16];
+    char clientId[user_id_length];
     uint8_t version_ = 1;
     uint8_t code;
     uint32_t size;
@@ -40,9 +41,25 @@ struct Response {
     int8_t version;
     int16_t code;
     unsigned int size;
-    boost::uuids::uuid uuid;
-    //std::string payload;
+    std::string payload;
 };
+struct RegisterResponse {
+    boost::uuids::uuid uuid;
+};
+struct UsersResponse {
+    char clientId[user_id_length];
+    char clientName[max_user_length];
+};
+
+void handler(
+    const boost::system::error_code& error, // Result of operation.
+
+    std::size_t bytes_transferred           // Number of bytes copied into the
+                                            // buffers. If an error occurred,
+                                            // this will be the  number of
+                                            // bytes successfully transferred
+                                            // prior to the error.
+);
 
 int main(int argc, char* argv[])
 {
@@ -94,6 +111,9 @@ int main(int argc, char* argv[])
         Response response;
         std::vector<boost::asio::const_buffer> buffers;
 
+        RegisterResponse register_response;
+        std::vector<UsersResponse> users_list;
+
         // Get instructions from user
         while (true) {
             memset(user, 0, sizeof user);
@@ -124,6 +144,7 @@ int main(int argc, char* argv[])
                 switch (std::stoi(action))
                 {
                     case Exit:
+                        s.close();
                         return 0;
                         break;
 
@@ -151,20 +172,23 @@ int main(int argc, char* argv[])
                         request.code = 100;
                         request.size = strlen(user);
 
-                        buffers.push_back(boost::asio::buffer(&request.clientId, 16));
+                        buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         buffers.push_back(boost::asio::buffer(user, strlen(user)));
+                        // TODO: add public key!
+                        //buffers.push_back(boost::asio::buffer(public_key, 32));
                         boost::asio::write(s, buffers);
                         
                         boost::asio::read(s, boost::asio::buffer(&response, 24));
+                        memcpy_s(&register_response, user_id_length, &response.payload, user_id_length);
 
                         if (response.code == 1000) {
                             
-                            uuid = response.uuid;
+                            uuid = register_response.uuid;
                             myfile.open("me.info");
-                            myfile << user << std::endl << response.uuid.data;
+                            myfile << user << std::endl << register_response.uuid.data;
                             myfile.close();
                         }
                         break;
@@ -179,12 +203,23 @@ int main(int argc, char* argv[])
                         request.code = 101;
                         request.size = 0;
 
-                        buffers.push_back(boost::asio::buffer(&request.clientId, 16));
+                        buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         boost::asio::write(s, buffers);
-                        boost::asio::read(s, boost::asio::buffer(&response, max_length));
+
+                        s.read_some(boost::asio::buffer(&response, max_length));
+
+                        if (response.code == 1001 && response.size > 0) {
+                            memcpy_s(&users_list, response.size, &response.payload, response.size);
+
+                            for (size_t i = 0; i < response.size / (16 + 255); i++)
+                            {
+                                UsersResponse user = users_list[i];
+                                std::wcout << user.clientId << " " << user.clientName << std::endl;
+                            }
+                        }
 
                         break;
 
@@ -275,4 +310,8 @@ int main(int argc, char* argv[])
     }
 
     return 0;
+}
+
+void handler(const boost::system::error_code& error, std::size_t bytes_transferred)
+{
 }
