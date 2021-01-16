@@ -6,10 +6,9 @@
 #include <fstream>
 #include <filesystem>
 #include <boost/filesystem.hpp>
-#include <boost/archive/text_iarchive.hpp>
-#include <boost/archive/text_oarchive.hpp>
-//#include <boost/archive/binary_oarchive.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include <boost/lexical_cast.hpp>
 
 using namespace std;
 using boost::asio::ip::tcp;
@@ -97,6 +96,7 @@ int main(int argc, char* argv[])
         tcp::resolver resolver(io_context);
         boost::asio::connect(s, resolver.resolve(host.c_str(), port.c_str()));
 
+        // Declare variables
         char user[max_user_length];
         char message[max_length];
         boost::uuids::uuid uuid;
@@ -158,7 +158,7 @@ int main(int argc, char* argv[])
                                 std::getline(myfile_i, userName);
                                 std::getline(myfile_i, uuid_str);
                                 myfile_i.close();
-                                memcpy_s(&uuid, 16, uuid_str.c_str(), 16);
+                                uuid = boost::lexical_cast<boost::uuids::uuid>(uuid_str);
                             }
                             break;
                         }
@@ -187,8 +187,9 @@ int main(int argc, char* argv[])
                         if (response.code == 1000) {
                             
                             uuid = register_response.uuid;
+                            uuid_str = boost::uuids::to_string(uuid);
                             myfile.open("me.info");
-                            myfile << user << std::endl << register_response.uuid.data;
+                            myfile << user << std::endl << uuid_str;
                             myfile.close();
                         }
                         break;
