@@ -14,9 +14,10 @@ using namespace std;
 using boost::asio::ip::tcp;
 
 enum {
-    max_length = 1024,
+    max_length = 2048,
     max_user_length = 255,
     user_id_length = 16,
+    max_clients = 7,
 };
 enum Action {
     Exit = 0,
@@ -46,20 +47,26 @@ struct RegisterResponse {
     boost::uuids::uuid uuid;
 };
 struct UsersResponse {
-    char clientId[user_id_length];
+    boost::uuids::uuid uuid;
     char clientName[max_user_length];
 };
-
-void handler(
-    const boost::system::error_code& error, // Result of operation.
-
-    std::size_t bytes_transferred           // Number of bytes copied into the
-                                            // buffers. If an error occurred,
-                                            // this will be the  number of
-                                            // bytes successfully transferred
-                                            // prior to the error.
-);
-
+struct SentResponse {
+    boost::uuids::uuid uuid;
+    unsigned int id;
+};
+struct OutMessage {
+    boost::uuids::uuid uuid_to;
+    char type;
+    unsigned int size;
+    std::string content;
+};
+struct InMessage {
+    boost::uuids::uuid uuid_to;
+    unsigned int id;
+    char type;
+    unsigned int size;
+    std::string content;
+};
 int main(int argc, char* argv[])
 {
     try
@@ -99,7 +106,9 @@ int main(int argc, char* argv[])
         // Declare variables
         char user[max_user_length];
         char message[max_length];
+        char uid_arr[32];
         boost::uuids::uuid uuid;
+        boost::uuids::uuid other_uuid;
         string userName;
         string uuid_str;
         string action;
@@ -112,7 +121,10 @@ int main(int argc, char* argv[])
         std::vector<boost::asio::const_buffer> buffers;
 
         RegisterResponse register_response;
-        std::vector<UsersResponse> users_list;
+        UsersResponse users_list[max_clients];
+        SentResponse sent_response;
+        OutMessage out_message;
+        InMessage in_message;
 
         // Get instructions from user
         while (true) {
@@ -124,12 +136,12 @@ int main(int argc, char* argv[])
             action.clear();
             request.version_ = 1;
 
-            //if (strlen(uid) != 0)
-               //strcpy_s(request.clientId, uid);
+            if (!uuid.is_nil())
+                std::copy(uuid.begin(), uuid.end(), request.clientId);
 
             try
             {
-                std::cout << "MessageU client at your service! " << std::endl <<
+                std::cout << std::endl << "MessageU client at your service! " << std::endl <<
                     "1) Register" << std::endl <<
                     "2) Request for client list" << std::endl <<
                     "3) Request for public key" << std::endl <<
@@ -200,7 +212,6 @@ int main(int argc, char* argv[])
                             break;
                         }
 
-                        std::copy(uuid.begin(), uuid.end(), request.clientId);
                         request.code = 101;
                         request.size = 0;
 
@@ -215,10 +226,13 @@ int main(int argc, char* argv[])
                         if (response.code == 1001 && response.size > 0) {
                             memcpy_s(&users_list, response.size, &response.payload, response.size);
 
+                            std::cout << "Cleints list:" << std::endl;
+
+                            // Go over the clients and print them
                             for (size_t i = 0; i < response.size / (16 + 255); i++)
                             {
-                                UsersResponse user = users_list[i];
-                                std::wcout << user.clientId << " " << user.clientName << std::endl;
+                                uuid_str = boost::uuids::to_string(users_list[i].uuid);
+                                std::cout << (i+1) << ". " << uuid_str.c_str() << " " << users_list[i].clientName << std::endl;
                             }
                         }
 
@@ -229,7 +243,22 @@ int main(int argc, char* argv[])
                             std::cout << "You need to register first." << std::endl;
                             break;
                         }
+
+                        std::cout << "Whose public key would you like to request?";
+                        std::cin.getline(uid_arr, 32);
+
+                        other_uuid = boost::lexical_cast<boost::uuids::uuid>(uid_arr);
                         request.code = 102;
+                        request.size = 0;
+
+                        buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
+                        buffers.push_back(boost::asio::buffer(&request.version_, 1));
+                        buffers.push_back(boost::asio::buffer(&request.code, 1));
+                        buffers.push_back(boost::asio::buffer(&request.size, 4));
+                        buffers.push_back(boost::asio::buffer(&other_uuid, 16));
+                        boost::asio::write(s, buffers);
+
+                        s.read_some(boost::asio::buffer(&response, max_length));
 
                         break;
 
@@ -240,6 +269,12 @@ int main(int argc, char* argv[])
                         }
                         request.code = 104;
                         request.size = 0;
+
+                        buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
+                        buffers.push_back(boost::asio::buffer(&request.version_, 1));
+                        buffers.push_back(boost::asio::buffer(&request.code, 1));
+                        buffers.push_back(boost::asio::buffer(&request.size, 4));
+                        boost::asio::write(s, buffers);
 
                         break;
 
@@ -254,6 +289,17 @@ int main(int argc, char* argv[])
                         std::cin.getline(message, max_length);
 
                         request.code = 104;
+                        request.size = 0;
+                        out_message.content = message;
+                        out_message.size = sizeof(out_message.content);
+
+                        buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
+                        buffers.push_back(boost::asio::buffer(&request.version_, 1));
+                        buffers.push_back(boost::asio::buffer(&request.code, 1));
+                        buffers.push_back(boost::asio::buffer(&request.size, 4));
+                        boost::asio::write(s, buffers);
+
+                        //sent_response
 
                         break;
 
@@ -292,18 +338,6 @@ int main(int argc, char* argv[])
                 std::cerr << "server responded with an error" << std::endl << e.what() << std::endl;
             }
         }
-
-        std::cout << "Enter message: ";
-        char req[max_length];
-        std::cin.getline(req, max_length);
-        request_length = std::strlen(req);
-        boost::asio::write(s, boost::asio::buffer(req, request_length));
-
-        char reply[max_length];
-        size_t reply_length = boost::asio::read(s,
-            boost::asio::buffer(reply, request_length));
-        std::cout << "Reply is: ";
-        std::cout.write(reply, reply_length);
     }
     catch (std::exception& e)
     {
