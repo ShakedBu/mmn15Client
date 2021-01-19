@@ -143,8 +143,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Client.cpp" />
+    <ClCompile Include="ClientHandler.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ClientHandler.h" />
     <ClInclude Include="enums.h" />
     <ClInclude Include="structs.h" />
   </ItemGroup>

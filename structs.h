@@ -14,12 +14,6 @@ struct Request {
     uint32_t size;
     std::string paylod;
 };
-struct Response {
-    int8_t version;
-    int16_t code;
-    unsigned int size;
-    std::string payload;
-};
 struct ResponseHeader {
     int8_t version;
     int16_t code;
@@ -42,16 +36,19 @@ struct OutMessage {
     unsigned int size;
     std::string content;
 };
-struct InMessage {
-    boost::uuids::uuid uuid_to;
+struct InMessageHeader {
+    boost::uuids::uuid uuid_from;
     unsigned int id;
     char type;
     unsigned int size;
-    std::string content;
 };
 struct User {
     boost::uuids::uuid uuid;
-    char clientName[max_user_length];
+    std::string clientName;
     char publicKey[32];
     char symKey;
+};
+struct PublicKeyResponse {
+    boost::uuids::uuid uuid;
+    char publicKey[32];
 };

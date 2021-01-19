@@ -18,3 +18,6 @@ enum Action {
     RequestKey = 51,
     SendKey = 52
 };
+enum ResponseCode {
+    fail = 9000
+};

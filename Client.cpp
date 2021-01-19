@@ -11,6 +11,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "structs.h"
+#include "ClientHandler.h"
 
 using namespace std;
 using boost::asio::ip::tcp;
@@ -28,13 +29,13 @@ int main(int argc, char* argv[])
         {
             if (serverfile.good())
             {
-                // Get host
+                // get host
                 getline(serverfile, host, ':');
                 cout << host << ":";
 
                 if (serverfile.good())
                 {
-                    // Get port
+                    // get port
                     getline(serverfile, port, ':');
                     cout << port << endl;
                 }
@@ -43,44 +44,52 @@ int main(int argc, char* argv[])
             serverfile.close();
         }
 
+        
 
         boost::asio::io_context io_context;
+        //ClientHandler* myClient = new ClientHandler(io_context);
 
         // Connect to server
         tcp::socket s(io_context);
         tcp::resolver resolver(io_context);
         boost::asio::connect(s, resolver.resolve(host.c_str(), port.c_str()));
 
+        // Not changing bwtween loops
+        boost::uuids::uuid uuid;
+        std::vector<User> users;
+
+        // Files
+        boost::filesystem::path userfile("me.info");
+        ofstream myfile;
+        ifstream myfile_i;
+
         // Declare variables
         char user[max_user_length];
         char message[max_length];
         char uid_arr[32];
-        boost::uuids::uuid uuid;
         boost::uuids::uuid other_uuid;
         string userName;
         string uuid_str;
         string action;
-        boost::filesystem::path userfile("me.info");
-        ofstream myfile;
-        ifstream myfile_i;
         Request request;
         size_t request_length;
-        Response response;
+        ResponseHeader response_header;
         std::vector<boost::asio::const_buffer> buffers;
-
         RegisterResponse register_response;
         UsersResponse users_list;;
         int user_num;
         SentResponse sent_response;
         OutMessage out_message;
-        InMessage in_message;
+        InMessageHeader in_message;
+        char* message_content;
+        PublicKeyResponse public_key;
 
         // Get instructions from user
         while (true) {
             memset(user, 0, sizeof user);
             memset(message, 0, sizeof message);
             memset(&request, 0, sizeof request);
-            memset(&response, 0, sizeof response);
+            memset(&response_header, 0, sizeof response_header);
             buffers.clear();
             action.clear();
             request.version_ = 1;
@@ -142,11 +151,10 @@ int main(int argc, char* argv[])
                         //buffers.push_back(boost::asio::buffer(public_key, 32));
                         boost::asio::write(s, buffers);
                         
-                        boost::asio::read(s, boost::asio::buffer(&response, 24));
-                        memcpy_s(&register_response, user_id_length, &response.payload, user_id_length);
-
-                        if (response.code == 1000) {
-                            
+                        boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
+                        
+                        if (response_header.code == 1000) {
+                            boost::asio::read(s, boost::asio::buffer(&register_response, sizeof register_response));
                             uuid = register_response.uuid;
                             uuid_str = boost::uuids::to_string(uuid);
                             myfile.open("me.info");
@@ -170,16 +178,23 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         boost::asio::write(s, buffers);
 
-                        boost::asio::read(s, boost::asio::buffer(&response, 7));
+                        boost::asio::read(s, boost::asio::buffer(&response_header, 7));
 
-                        if (response.code == 1001 && response.size > 0) {
-                            user_num = response.size / (16 + 255);
-                             std::cout << "Cleints list:" << std::endl;
+                        if (response_header.code == 1001 && response_header.size > 0) {
+                            user_num = response_header.size / (16 + 255);
+                            std::cout << "Cleints list:" << std::endl;
+                            users.clear();
 
                             // Go over the clients and print them
                             for (size_t i = 0; i < user_num; i++)
                             {
                                 boost::asio::read(s, boost::asio::buffer(&users_list, sizeof users_list));
+
+                                User new_user;
+                                new_user.clientName = users_list.clientName;
+                                new_user.uuid = users_list.uuid;
+                                users.push_back(new_user);
+
                                 uuid_str = boost::uuids::to_string(users_list.uuid);
                                 std::cout << (i+1) << ". " << uuid_str.c_str() << " " << users_list.clientName << std::endl;
                             }
@@ -198,7 +213,7 @@ int main(int argc, char* argv[])
                         user_num = std::stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > sizeof(users_list)/sizeof(UsersResponse) ){
+                        if (user_num < 0 || user_num > users.size()){
                             std::cout << "no such user!" << std::endl;
                         }
 
@@ -210,10 +225,21 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
-                        //buffers.push_back(boost::asio::buffer(&users_list[user_num], 16));
+                        buffers.push_back(boost::asio::buffer(&users[user_num].uuid, 16));
                         boost::asio::write(s, buffers);
 
-                        s.read_some(boost::asio::buffer(&response, max_length));
+                        boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
+
+                        if (response_header.code == 1002 && response_header.size > 0) {
+                            boost::asio::read(s, boost::asio::buffer(&public_key, sizeof public_key));
+
+                            // Saves user's public key
+                            for (size_t i = 0; i < users.size(); i++)
+                            {
+                                if (users[i].uuid == public_key.uuid)
+                                    strcpy_s(&users[i].publicKey[0], 32, &public_key.publicKey[0]);
+                            }
+                        }
 
                         break;
 
@@ -231,13 +257,31 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         boost::asio::write(s, buffers);
 
-                        s.read_some(boost::asio::buffer(&response, max_length));
+                        boost::asio::read(s, boost::asio::buffer(&response_header, max_length));
 
-                        if (response.code == 1004 && response.size > 0) {
+                        if (response_header.code == 1004 && response_header.size > 0) {
+                            int left = response_header.size;
 
-                            memcpy_s(&in_message, response.size, &response.payload, response.size);
-                            // Go over messages.
-                            
+                            std::cout << "Waiting messages: " << std::endl;
+
+                            while (left > 0) {
+                                // Go over messages.
+                                boost::asio::read(s, boost::asio::buffer(&in_message, sizeof in_message));
+                                boost::asio::read(s, boost::asio::buffer(&message_content, in_message.size));
+
+                                switch (in_message.type) {
+                                case 1:
+                                    break;
+                                case 2:
+                                    break;
+                                case 3:
+                                    std::cout << in_message.uuid_from << ": " << message_content << std::endl;
+                                    break;
+                                }
+
+                                left = left - sizeof in_message - in_message.size;
+                            }
+
                         }
                         break;
 
@@ -251,7 +295,7 @@ int main(int argc, char* argv[])
                         user_num = std::stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > sizeof(users_list) / sizeof(UsersResponse)) {
+                        if (user_num < 0 || user_num > users.size()) {
                             std::cout << "no such user!" << std::endl;
                             break;
                         }
@@ -263,7 +307,7 @@ int main(int argc, char* argv[])
                         out_message.content = message;
                         out_message.size = sizeof(out_message.content);
                         out_message.type = 3;
-                        //out_message.uuid_to = users_list[user_num].uuid;
+                        out_message.uuid_to = users[user_num].uuid;
 
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
@@ -275,7 +319,12 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&out_message.content, out_message.size));
                         boost::asio::write(s, buffers);
 
-                        s.read_some(boost::asio::buffer(&response, max_length));
+                        boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
+
+                        if (response_header.code == 1004 && response_header.size > 0) {
+                            // Read message id
+                            boost::asio::read(s, boost::asio::buffer(&message_content, 4));
+                        }
 
                         break;
 
@@ -289,7 +338,7 @@ int main(int argc, char* argv[])
                         user_num = std::stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > sizeof(users_list) / sizeof(UsersResponse)) {
+                        if (user_num < 0 || user_num > users.size()) {
                             std::cout << "no such user!" << std::endl;
                             break;
                         }
@@ -298,7 +347,7 @@ int main(int argc, char* argv[])
                         request.size = 0;
                         out_message.size = 0;
                         out_message.type = 1;
-                        //out_message.uuid_to = users_list[user_num].uuid;
+                        out_message.uuid_to = users[user_num].uuid;
 
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
@@ -309,7 +358,10 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&out_message.size, 4));
                         boost::asio::write(s, buffers);
 
-                        s.read_some(boost::asio::buffer(&response, max_length));
+                        boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
+
+                        if (response_header.code == 1002 && response_header.size > 0)
+                            boost::asio::read(s, boost::asio::buffer(&public_key, sizeof public_key));
 
                         break;
 
@@ -323,7 +375,7 @@ int main(int argc, char* argv[])
                         user_num = std::stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > sizeof(users_list) / sizeof(UsersResponse)) {
+                        if (user_num < 0 || user_num > users.size()) {
                             std::cout << "no such user!" << std::endl;
                             break;
                         }
@@ -332,7 +384,7 @@ int main(int argc, char* argv[])
                         request.size = 0;
                         out_message.size = 128;
                         out_message.type = 2;
-                        //out_message.uuid_to = users_list[user_num].uuid;
+                        out_message.uuid_to = users[user_num].uuid;
                         out_message.content = "";// TODO: sym key
 
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
@@ -345,7 +397,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&out_message.content, out_message.size));
                         boost::asio::write(s, buffers);
 
-                        s.read_some(boost::asio::buffer(&response, max_length));
+                        boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
 
                         break;
 
@@ -366,8 +418,4 @@ int main(int argc, char* argv[])
     }
 
     return 0;
-}
-
-void handler(const boost::system::error_code& error, std::size_t bytes_transferred)
-{
 }
