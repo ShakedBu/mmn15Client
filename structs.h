@@ -34,7 +34,6 @@ struct OutMessage {
     boost::uuids::uuid uuid_to;
     char type;
     unsigned int size;
-    std::string content;
 };
 struct InMessageHeader {
     boost::uuids::uuid uuid_from;
