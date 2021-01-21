@@ -1,3 +1,4 @@
+#include <osrng.h> 
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -9,12 +10,17 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
-
 #include "structs.h"
 #include "ClientHandler.h"
+#include "modes.h"
+using CryptoPP::CFB_Mode;
 
 using namespace std;
 using boost::asio::ip::tcp;
+using CryptoPP::AutoSeededRandomPool;
+using CryptoPP::AES;
+using CryptoPP::CFB_Mode;
+
 
 int main(int argc, char* argv[])
 {
@@ -76,6 +82,12 @@ int main(int argc, char* argv[])
         InMessageHeader in_message;
         char* message_content;
         PublicKeyResponse public_key;
+
+        // Keys
+        AutoSeededRandomPool rnd;
+        CryptoPP::SecByteBlock key(0x00, AES::DEFAULT_KEYLENGTH);
+        CryptoPP::SecByteBlock iv(AES::BLOCKSIZE);
+        CFB_Mode<AES>::Encryption cfbEncryption(key, key.size(), iv);
 
         // Get instructions from user
         while (true) {
@@ -274,15 +286,23 @@ int main(int argc, char* argv[])
                                     }
                                 }
 
-                                boost::asio::read(s, boost::asio::buffer(&message, in_message.size));
+                                if (in_message.size > 0)
+                                    boost::asio::read(s, boost::asio::buffer(&message, in_message.size));
 
                                 switch (in_message.type) {
                                 case 1:
+                                    std::cout << "From: " << fromUser.clientName << std::endl <<
+                                        "Request for symmetric key" << std::endl;
                                     break;
                                 case 2:
+                                    std::cout << "From: " << fromUser.clientName << std::endl <<
+                                        "symmetric key received" << std::endl;
+                                    strcpy_s(fromUser.symKey, AES::DEFAULT_KEYLENGTH + 1, message);
+                                    // TODO: save the symmetric key
                                     break;
                                 case 3:
-                                    std::cout << fromUser.clientName << ": " << message << std::endl;
+                                    std::cout << "From: " <<  fromUser.clientName << std::endl <<
+                                        "Content:" << std::endl << message << std::endl;
                                     break;
                                 }
 
@@ -306,8 +326,20 @@ int main(int argc, char* argv[])
                             std::cout << "no such user!" << std::endl;
                             break;
                         }
+
+                        if (strlen(users[user_num].symKey) < 16) {
+                            std::cout << "no symmetric key for that user!" << std::endl;
+                            break;
+                        }
+
                         std::cout << "Enter the message to be sent: " << std::endl;
                         std::cin.getline(message, max_length);
+
+
+                        // TODO: Encrypt by the user's symmetric key
+                        // Encrypt
+                        
+                        //cfbEncryption.ProcessData((CryptoPP::byte*)message, (CryptoPP::byte*)message, strlen(message) + 1);
 
                         request.code = 103;
                         request.size = sizeof out_message + strlen(message);
@@ -350,7 +382,7 @@ int main(int argc, char* argv[])
                             break;
                         }
 
-                        request.code = 102;
+                        request.code = 103;
                         request.size = 0;
                         out_message.size = 0;
                         out_message.type = 1;
@@ -387,12 +419,20 @@ int main(int argc, char* argv[])
                             break;
                         }
 
-                        request.code = 102;
+                        // Encrypt symmetric key with public key!
+                        // Generate a random key
+                        rnd.GenerateBlock(key, key.size());
+
+                        // Generate a random IV
+                        rnd.GenerateBlock(iv, iv.size());
+
+                        strcpy_s(users[user_num].symKey, key.size(), (char*)key.begin());
+
+                        request.code = 103;
                         request.size = 0;
                         out_message.size = 128;
                         out_message.type = 2;
                         out_message.uuid_to = users[user_num].uuid;
-                        //out_message.content = "";// TODO: sym key
 
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
@@ -401,7 +441,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&out_message.uuid_to, 16));
                         buffers.push_back(boost::asio::buffer(&out_message.type, 1));
                         buffers.push_back(boost::asio::buffer(&out_message.size, 4));
-                        //buffers.push_back(boost::asio::buffer(&out_message.content, out_message.size));
+                        buffers.push_back(boost::asio::buffer(users[user_num].symKey, key.size()));
                         boost::asio::write(s, buffers);
 
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));

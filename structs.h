@@ -4,6 +4,8 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/asio.hpp>
 #include <iostream>
+#include <osrng.h> 
+#include <cryptlib.h>
 
 #include "enums.h"
 
@@ -45,7 +47,7 @@ struct User {
     boost::uuids::uuid uuid;
     std::string clientName;
     char publicKey[32];
-    char symKey;
+    char symKey[16];
 };
 struct PublicKeyResponse {
     boost::uuids::uuid uuid;
