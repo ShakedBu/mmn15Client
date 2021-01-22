@@ -6,6 +6,7 @@
 #include <iostream>
 #include <osrng.h> 
 #include <cryptlib.h>
+#include <rsa.h> 
 
 #include "enums.h"
 
@@ -46,10 +47,14 @@ struct InMessageHeader {
 struct User {
     boost::uuids::uuid uuid;
     std::string clientName;
-    char publicKey[32];
+    CryptoPP::RSA::PublicKey publicKey;
     char symKey[16];
 };
 struct PublicKeyResponse {
     boost::uuids::uuid uuid;
     char publicKey[32];
+};
+struct SymmKeyResponse {
+    boost::uuids::uuid uuid;
+    char publicKey[16];
 };

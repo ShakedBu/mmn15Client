@@ -13,12 +13,13 @@
 #include "structs.h"
 #include "ClientHandler.h"
 #include "modes.h"
-using CryptoPP::CFB_Mode;
+#include <rsa.h> 
 
 using namespace std;
 using boost::asio::ip::tcp;
 using CryptoPP::AutoSeededRandomPool;
 using CryptoPP::AES;
+using CryptoPP::RSA;
 using CryptoPP::CFB_Mode;
 
 
@@ -82,12 +83,27 @@ int main(int argc, char* argv[])
         InMessageHeader in_message;
         char* message_content;
         PublicKeyResponse public_key;
+        SymmKeyResponse symm_key;
 
         // Keys
         AutoSeededRandomPool rnd;
         CryptoPP::SecByteBlock key(0x00, AES::DEFAULT_KEYLENGTH);
         CryptoPP::SecByteBlock iv(AES::BLOCKSIZE);
         CFB_Mode<AES>::Encryption cfbEncryption(key, key.size(), iv);
+
+        ///////////////////////////////////////
+        // Pseudo Random Number Generator
+        AutoSeededRandomPool rng;
+
+        ///////////////////////////////////////
+        // Generate Parameters
+        CryptoPP::InvertibleRSAFunction params;
+        params.GenerateRandomWithKeySize(rng, 1024);
+
+        ///////////////////////////////////////
+        // Create Keys
+        RSA::PrivateKey privateKey(params);
+        RSA::PublicKey publicKey(params);
 
         // Get instructions from user
         while (true) {
@@ -154,7 +170,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         buffers.push_back(boost::asio::buffer(user, strlen(user)));
                         // TODO: add public key!
-                        //buffers.push_back(boost::asio::buffer(public_key, 32));
+                        buffers.push_back(boost::asio::buffer(&publicKey, 32));
                         boost::asio::write(s, buffers);
                         
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
@@ -242,11 +258,14 @@ int main(int argc, char* argv[])
                         if (response_header.code == 1002 && response_header.size > 0) {
                             boost::asio::read(s, boost::asio::buffer(&public_key, sizeof public_key));
 
+                            std::string public_key_str = public_key.publicKey;
+                            CryptoPP::StringSink ss(public_key_str);
+
                             // Saves user's public key
                             for (size_t i = 0; i < users.size(); i++)
                             {
                                 if (users[i].uuid == public_key.uuid)
-                                    strcpy_s(&users[i].publicKey[0], 32, &public_key.publicKey[0]);
+                                    users[i].publicKey.Save(ss);
                             }
                         }
 
@@ -399,8 +418,10 @@ int main(int argc, char* argv[])
 
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
 
-                        if (response_header.code == 1002 && response_header.size > 0)
-                            boost::asio::read(s, boost::asio::buffer(&public_key, sizeof public_key));
+                        if (response_header.code == 1002 && response_header.size > 0) {
+                            boost::asio::read(s, boost::asio::buffer(&sent_response, sizeof sent_response));
+                            std::cout << "Symmetric key requested - " << sent_response.id << std::endl;
+                        }
 
                         break;
 
@@ -421,12 +442,12 @@ int main(int argc, char* argv[])
 
                         // Encrypt symmetric key with public key!
                         // Generate a random key
-                        rnd.GenerateBlock(key, key.size());
+                        //rnd.GenerateBlock(key, key.size());
 
                         // Generate a random IV
-                        rnd.GenerateBlock(iv, iv.size());
+                        //rnd.GenerateBlock(iv, iv.size());
 
-                        strcpy_s(users[user_num].symKey, key.size(), (char*)key.begin());
+                        //strcpy_s(users[user_num].symKey, key.size(), (char*)key.begin());
 
                         request.code = 103;
                         request.size = 0;
@@ -441,7 +462,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&out_message.uuid_to, 16));
                         buffers.push_back(boost::asio::buffer(&out_message.type, 1));
                         buffers.push_back(boost::asio::buffer(&out_message.size, 4));
-                        buffers.push_back(boost::asio::buffer(users[user_num].symKey, key.size()));
+                        //buffers.push_back(boost::asio::buffer(users[user_num].symKey, key.size()));
                         boost::asio::write(s, buffers);
 
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
