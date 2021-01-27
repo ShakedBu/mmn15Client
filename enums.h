@@ -11,7 +11,7 @@ enum Action {
     Exit = 0,
     Register = 1,
     ClientList = 2,
-    PublicKey = 3,
+    GetPublicKey = 3,
     WaitingMessages = 4,
     SendTextMessage = 5,
     SendFile = 50,

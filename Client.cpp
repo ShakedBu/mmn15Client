@@ -11,11 +11,11 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
 #include "structs.h"
-#include "ClientHandler.h"
 #include "modes.h"
 #include <rsa.h> 
 
 using namespace std;
+using namespace CryptoPP;
 using boost::asio::ip::tcp;
 using CryptoPP::AutoSeededRandomPool;
 using CryptoPP::AES;
@@ -56,7 +56,7 @@ int main(int argc, char* argv[])
         tcp::resolver resolver(io_context);
         boost::asio::connect(s, resolver.resolve(host.c_str(), port.c_str()));
 
-        // Not changing bwtween loops
+        // Not changing between loops
         boost::uuids::uuid uuid;
         std::vector<User> users;
 
@@ -65,30 +65,39 @@ int main(int argc, char* argv[])
         ofstream myfile;
         ifstream myfile_i;
 
-        // Declare variables
-        char user[max_user_length];
+        // General
+        std::vector<boost::asio::const_buffer> buffers;
+        Request request;
+        string action;
+        ResponseHeader response_header;
         char message[max_length];
-        boost::uuids::uuid other_uuid;
+        int user_num;
+
+        // Registration
+        char user[max_user_length];
         string userName;
         string uuid_str;
-        string action;
-        Request request;
-        ResponseHeader response_header;
-        std::vector<boost::asio::const_buffer> buffers;
         RegisterResponse register_response;
+
+        // Clients list
         UsersResponse users_list;
-        int user_num;
+
+        // Message sending
         SentResponse sent_response;
         OutMessage out_message;
+
+        // Waiting messages
         InMessageHeader in_message;
         char* message_content;
+
+
         PublicKeyResponse public_key;
         SymmKeyResponse symm_key;
 
         // Keys
         AutoSeededRandomPool rnd;
-        CryptoPP::SecByteBlock key(0x00, AES::DEFAULT_KEYLENGTH);
-        CryptoPP::SecByteBlock iv(AES::BLOCKSIZE);
+        SecByteBlock key(0x00, AES::DEFAULT_KEYLENGTH);
+        SecByteBlock iv(AES::BLOCKSIZE);
         CFB_Mode<AES>::Encryption cfbEncryption(key, key.size(), iv);
 
         ///////////////////////////////////////
@@ -97,13 +106,26 @@ int main(int argc, char* argv[])
 
         ///////////////////////////////////////
         // Generate Parameters
-        CryptoPP::InvertibleRSAFunction params;
+        InvertibleRSAFunction params;
         params.GenerateRandomWithKeySize(rng, 1024);
 
         ///////////////////////////////////////
         // Create Keys
         RSA::PrivateKey privateKey(params);
         RSA::PublicKey publicKey(params);
+
+        byte buf[32];
+        ArraySink sink(buf, 32);
+        publicKey.Save(sink);
+
+        ////////////////////////////////////////////////
+        // Encrypt
+        RSAES_OAEP_SHA_Encryptor rsa_encryptor(publicKey);
+        SecByteBlock rsa_plaintext(16);
+        RSAES_OAEP_SHA_Decryptor rsa_decryptor(privateKey);
+        SecByteBlock rsa_recovered(16);
+        SecByteBlock rsa_ciphertext( 16 );
+        DecodingResult result;
 
         // Get instructions from user
         while (true) {
@@ -156,7 +178,7 @@ int main(int argc, char* argv[])
                         }
 
                         // Get user name and register user
-                        std::cout << "Enter tour name: ";
+                        std::cout << "Enter your name: ";
                         std::cin.getline(user, max_user_length);
                     
                         // Send to server
@@ -169,8 +191,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         buffers.push_back(boost::asio::buffer(user, strlen(user)));
-                        // TODO: add public key!
-                        buffers.push_back(boost::asio::buffer(&publicKey, 32));
+                        buffers.push_back(boost::asio::buffer(&buf, 32));
                         boost::asio::write(s, buffers);
                         
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
@@ -227,7 +248,7 @@ int main(int argc, char* argv[])
 
                         break;
 
-                    case PublicKey:
+                    case GetPublicKey:
                         if (!boost::filesystem::exists(userfile)) {
                             std::cout << "You need to register first." << std::endl;
                             break;
@@ -305,8 +326,16 @@ int main(int argc, char* argv[])
                                     }
                                 }
 
-                                if (in_message.size > 0)
+                                if (in_message.size > 0) {
                                     boost::asio::read(s, boost::asio::buffer(&message, in_message.size));
+
+                                    if (in_message.type == 2)
+                                        std::cout << "asymmetric";
+                                    //CryptoPP::StringSource ss2(message, true, new CryptoPP::PK_DecryptorFilter(rng, d, new CryptoPP::StringSink(recoverd)));
+                                    else if (in_message.type == 3)
+                                        std::cout << "symmetric";
+                                }
+
 
                                 switch (in_message.type) {
                                 case 1:
@@ -314,12 +343,14 @@ int main(int argc, char* argv[])
                                         "Request for symmetric key" << std::endl;
                                     break;
                                 case 2:
+                                    result = rsa_decryptor.Decrypt(rng, rsa_ciphertext, rsa_ciphertext.size(), rsa_recovered);
+                                    //strcpy_s(fromUser.symKey, recoverd.c_str());
+
                                     std::cout << "From: " << fromUser.clientName << std::endl <<
                                         "symmetric key received" << std::endl;
-                                    strcpy_s(fromUser.symKey, AES::DEFAULT_KEYLENGTH + 1, message);
-                                    // TODO: save the symmetric key
                                     break;
                                 case 3:
+                                    //TODO: dencode the message
                                     std::cout << "From: " <<  fromUser.clientName << std::endl <<
                                         "Content:" << std::endl << message << std::endl;
                                     break;
@@ -440,6 +471,16 @@ int main(int argc, char* argv[])
                             break;
                         }
 
+                        
+
+                        // Create cipher text space
+                        //memset(plaintext, (const CryptoPP::byte*)users[user_num].symKey, 16);
+
+                        //CryptoPP::SecByteBlock ciphertext(16);
+
+                        //encryptor.Encrypt(rng, plaintext, plaintext.size(), ciphertext);
+
+
                         // Encrypt symmetric key with public key!
                         // Generate a random key
                         //rnd.GenerateBlock(key, key.size());
@@ -462,7 +503,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&out_message.uuid_to, 16));
                         buffers.push_back(boost::asio::buffer(&out_message.type, 1));
                         buffers.push_back(boost::asio::buffer(&out_message.size, 4));
-                        //buffers.push_back(boost::asio::buffer(users[user_num].symKey, key.size()));
+                        //buffers.push_back(boost::asio::buffer(&ciphertext.BytePtr(), ciphertext.size()));
                         boost::asio::write(s, buffers);
 
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
