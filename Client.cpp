@@ -1,27 +1,33 @@
-#include <osrng.h> 
+//#include "dll.h"
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <iostream>
-#include <boost/asio.hpp>
 #include <fstream>
 #include <filesystem>
 #include <boost/filesystem.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
+#include "cryptlib.h"
+#include "osrng.h"
+#include "SecBlock.h"
 #include "structs.h"
+#include "aes.h"
 #include "modes.h"
-#include <rsa.h> 
 
 using namespace std;
 using namespace CryptoPP;
 using boost::asio::ip::tcp;
 using CryptoPP::AutoSeededRandomPool;
 using CryptoPP::AES;
-using CryptoPP::RSA;
 using CryptoPP::CFB_Mode;
 
+#include "rsa.h" 
+using CryptoPP::RSA;
+using CryptoPP::InvertibleRSAFunction;
+using CryptoPP::RSAES_OAEP_SHA_Encryptor;
+using CryptoPP::RSAES_OAEP_SHA_Decryptor;
 
 int main(int argc, char* argv[])
 {
@@ -106,17 +112,24 @@ int main(int argc, char* argv[])
 
         ///////////////////////////////////////
         // Generate Parameters
-        InvertibleRSAFunction params;
-        params.GenerateRandomWithKeySize(rng, 1024);
+        //InvertibleRSAFunction params;
+        //params.GenerateRandomWithKeySize(rng, 1024);
 
         ///////////////////////////////////////
         // Create Keys
-        RSA::PrivateKey privateKey(params);
-        RSA::PublicKey publicKey(params);
+        /*RSA::PrivateKey privateKey(params);
+        RSA::PublicKey publicKey(params);*/
 
-        byte buf[32];
-        ArraySink sink(buf, 32);
-        publicKey.Save(sink);
+        ///////////////////////////////////////
+        // Create Keys
+        RSA::PrivateKey privateKey;
+        privateKey.GenerateRandomWithKeySize(rng, 1024);
+
+        RSA::PublicKey publicKey(privateKey);
+
+        string myPublicKeyStr;
+        StringSink strSink(myPublicKeyStr);
+        publicKey.Save(strSink);
 
         ////////////////////////////////////////////////
         // Encrypt
@@ -124,7 +137,7 @@ int main(int argc, char* argv[])
         SecByteBlock rsa_plaintext(16);
         RSAES_OAEP_SHA_Decryptor rsa_decryptor(privateKey);
         SecByteBlock rsa_recovered(16);
-        SecByteBlock rsa_ciphertext( 16 );
+        SecByteBlock rsa_ciphertext(16);
         DecodingResult result;
 
         // Get instructions from user
@@ -191,7 +204,7 @@ int main(int argc, char* argv[])
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
                         buffers.push_back(boost::asio::buffer(&request.size, 4));
                         buffers.push_back(boost::asio::buffer(user, strlen(user)));
-                        buffers.push_back(boost::asio::buffer(&buf, 32));
+                        buffers.push_back(boost::asio::buffer(&myPublicKeyStr, 32));
                         boost::asio::write(s, buffers);
                         
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
@@ -280,13 +293,14 @@ int main(int argc, char* argv[])
                             boost::asio::read(s, boost::asio::buffer(&public_key, sizeof public_key));
 
                             std::string public_key_str = public_key.publicKey;
-                            CryptoPP::StringSink ss(public_key_str);
+                            CryptoPP::StringSource PKeyStringSource(public_key_str, true);
 
                             // Saves user's public key
                             for (size_t i = 0; i < users.size(); i++)
                             {
-                                if (users[i].uuid == public_key.uuid)
-                                    users[i].publicKey.Save(ss);
+                                if (users[i].uuid == public_key.uuid) {
+                                    users[i].publicKey.Load(PKeyStringSource);
+                                }
                             }
                         }
 
