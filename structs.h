@@ -48,11 +48,13 @@ struct User {
     boost::uuids::uuid uuid;
     std::string clientName;
     CryptoPP::RSA::PublicKey publicKey;
-    char symKey[16];
+    CryptoPP::byte symKey[CryptoPP::AES::DEFAULT_KEYLENGTH];
+    bool hasPublic;
+    bool hasSymm;
 };
 struct PublicKeyResponse {
     boost::uuids::uuid uuid;
-    char publicKey[32];
+    CryptoPP::byte publicKey[160];
 };
 struct SymmKeyResponse {
     boost::uuids::uuid uuid;
