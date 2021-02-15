@@ -58,5 +58,5 @@ struct PublicKeyResponse {
 };
 struct SymmKeyResponse {
     boost::uuids::uuid uuid;
-    char publicKey[16];
+    char symmKey[CryptoPP::AES::DEFAULT_KEYLENGTH];
 };
