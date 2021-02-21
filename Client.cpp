@@ -1,4 +1,3 @@
-//#include "dll.h"
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -11,13 +10,13 @@
 #include <boost/lexical_cast.hpp>
 #include <base64.h>
 #include <rsa.h>
+#include <immintrin.h>
+#include <filters.h>
+#include <aes.h>
+#include <modes.h>
+#include <osrng.h>
 
-#include "cryptlib.h"
-#include "osrng.h"
-#include "SecBlock.h"
 #include "structs.h"
-#include "aes.h"
-#include "modes.h"
 
 using namespace std;
 using namespace CryptoPP;
@@ -118,19 +117,18 @@ int main(int argc, char* argv[])
 
         static const size_t KEYSIZE = 160;
         CryptoPP::byte buf[KEYSIZE];
-        /*CryptoPP::Base64Encoder pubkeysink(new CryptoPP::ArraySink(buf, KEYSIZE));
-        publicKey.DEREncode(pubkeysink);
-        pubkeysink.MessageEnd();*/
         CryptoPP::ArraySink as(buf, KEYSIZE);
         publicKey.Save(as);
 
         // RSA Decryptor
+        CryptoPP::RSAES_OAEP_SHA_Decryptor priv_d(privateKey);
 
         // AES
         CryptoPP::byte iv[CryptoPP::AES::BLOCKSIZE];
         memset(iv, 0x00, CryptoPP::AES::BLOCKSIZE);
 
         string ciphertext;
+        string plaintext;
 
         // Get instructions from user
         while (true) {
@@ -139,9 +137,11 @@ int main(int argc, char* argv[])
             memset(&request, 0, sizeof request);
             memset(&response_header, 0, sizeof response_header);
             memset(&users_list, 0, sizeof users_list);
+            memset(&sent_response, 0, sizeof sent_response);
             buffers.clear();
             action.clear();
             ciphertext.clear();
+            plaintext.clear();
             request.version_ = 1;
 
             if (!uuid.is_nil())
@@ -326,54 +326,55 @@ int main(int argc, char* argv[])
                             while (left > 0) {
                                 // Go over messages.
                                 boost::asio::read(s, boost::asio::buffer(&in_message, sizeof in_message));
-
-                                User fromUser;
                                 int user_num;
                                 for (size_t i = 0; i < users.size(); i++)
                                 {
                                     if (users[i].uuid == in_message.uuid_from) {
-                                        fromUser = users[i];
                                         user_num = i;
                                         break;
                                     }
                                 }                             
-                                CryptoPP::byte symm_buf[128];
+                                CryptoPP::byte messageb[128];
 
                                 if (in_message.size > 0) {
-                                    boost::asio::read(s, boost::asio::buffer(&symm_buf, in_message.size));
+                                    boost::asio::read(s, boost::asio::buffer(&messageb, in_message.size));
                                 }
 
                                 switch (in_message.type) {
                                 case 1:
-                                    std::cout << "From: " << fromUser.clientName << std::endl <<
+                                    std::cout << "From: " << users[user_num].clientName << std::endl <<
                                         "Request for symmetric key" << std::endl;
                                     break;
                                 case 2:
                                     {
                                         // Get other user's symmetric key
-                                        CryptoPP::RSAES_OAEP_SHA_Decryptor priv_d(privateKey);
-
                                         std::string decrypted;
-                                        CryptoPP::ArraySource ss(symm_buf, true, new CryptoPP::PK_DecryptorFilter(rng, priv_d, new CryptoPP::ArraySink(users[user_num].symKey, 16)));//new CryptoPP::StringSink(decrypted)));
+                                        CryptoPP::StringSource symmss(messageb, in_message.size, true, new CryptoPP::PK_DecryptorFilter(rng, priv_d, new CryptoPP::ArraySink(users[user_num].symKey, 16)));//new CryptoPP::StringSink(decrypted)));
                                         users[user_num].hasSymm = true;
 
-                                        std::cout << "From: " << fromUser.clientName << std::endl <<
+                                        std::cout << "From: " << users[user_num].clientName << std::endl <<
                                             "symmetric key received" << std::endl;
                                     }
 
                                     break;
                                 case 3:
-                                    std::string decryptedtext;
-                                    if (fromUser.hasSymm) {
-                                        CryptoPP::AES::Decryption aesDecryption(fromUser.symKey, CryptoPP::AES::DEFAULT_KEYLENGTH);
-                                        CryptoPP::CBC_Mode_ExternalCipher::Decryption cbcDecryption(aesDecryption, iv);
+                                    {
+                                        std::string decryptedtext;
+                                        if (users[user_num].hasSymm) {
+                                            CryptoPP::AES::Decryption aesDecryption(users[user_num].symKey, CryptoPP::AES::DEFAULT_KEYLENGTH);
+                                            CryptoPP::CBC_Mode_ExternalCipher::Decryption cbcDecryption(aesDecryption, iv);
 
-                                        CryptoPP::StreamTransformationFilter stfDecryptor(cbcDecryption, new CryptoPP::StringSink(decryptedtext));
-                                        stfDecryptor.Put(symm_buf, in_message.size);
-                                        stfDecryptor.MessageEnd();
+                                            CryptoPP::StreamTransformationFilter stfDecryptor(cbcDecryption, new CryptoPP::StringSink(decryptedtext));
+                                            stfDecryptor.Put(messageb, in_message.size);
+                                            stfDecryptor.MessageEnd();
 
-                                        std::cout << "From: " << fromUser.clientName << std::endl <<
-                                            "Content:" << std::endl << decryptedtext << std::endl;
+                                            std::cout << "From: " << users[user_num].clientName << std::endl <<
+                                                "Content:" << std::endl << decryptedtext << std::endl;
+                                        }
+                                        else {
+                                            std::cout << "From: " << users[user_num].clientName << std::endl <<
+                                                "Content:" << std::endl << "No symmetric key" << std::endl;
+                                        }
                                     }
                                     break;
                                 }
@@ -405,18 +406,27 @@ int main(int argc, char* argv[])
                         }
                         else {
                             std::cout << "Enter the message to be sent: " << std::endl;
-                            std::cin.getline(message, max_length);
+                            //std::cin.getline(message, max_length);
+                            std::getline(std::cin, plaintext);
 
-                            // Encrypt                           
+                            int size;
+
+                            if (plaintext.length() % 16 == 0)
+                                size = plaintext.length();
+                            else if (plaintext.length() % 16 != 0)
+                                size = plaintext.length() + 16 - (plaintext.length() % 128);
+
+                            // Encrypt 
+                            CryptoPP::byte cipherarray[1024];
                             CryptoPP::AES::Encryption aesEncryption(users[user_num].symKey, CryptoPP::AES::DEFAULT_KEYLENGTH);
                             CryptoPP::CBC_Mode_ExternalCipher::Encryption cbcEncryption(aesEncryption, iv);
-                            CryptoPP::StreamTransformationFilter stfEncryptor(cbcEncryption, new CryptoPP::StringSink(ciphertext));
-                            stfEncryptor.Put(reinterpret_cast<const unsigned char*>(message), strlen(message));
+                            CryptoPP::StreamTransformationFilter stfEncryptor(cbcEncryption, new CryptoPP::ArraySink(cipherarray, size));//StringSink(ciphertext));
+                            stfEncryptor.Put(reinterpret_cast<const unsigned char*>(plaintext.c_str()), plaintext.length());
                             stfEncryptor.MessageEnd();
 
                             request.code = 103;
-                            request.size = sizeof out_message + ciphertext.length();
-                            out_message.size = ciphertext.length();
+                            request.size = sizeof out_message + ciphertext.size();
+                            out_message.size = size;
                             out_message.type = 3;
                             out_message.uuid_to = users[user_num].uuid;
 
@@ -427,7 +437,7 @@ int main(int argc, char* argv[])
                             buffers.push_back(boost::asio::buffer(&out_message.uuid_to, 16));
                             buffers.push_back(boost::asio::buffer(&out_message.type, 1));
                             buffers.push_back(boost::asio::buffer(&out_message.size, 4));
-                            buffers.push_back(boost::asio::buffer(&ciphertext, ciphertext.length()));
+                            buffers.push_back(boost::asio::buffer(&cipherarray, size));
                             boost::asio::write(s, buffers);
                             boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
 
@@ -471,7 +481,7 @@ int main(int argc, char* argv[])
                         boost::asio::write(s, buffers);
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
 
-                        if (response_header.code == 1002 && response_header.size > 0) {
+                        if (response_header.code == 1003 && response_header.size > 0) {
                             boost::asio::read(s, boost::asio::buffer(&sent_response, sizeof sent_response));
                             std::cout << "Symmetric key requested - " << sent_response.id << std::endl;
                         }
@@ -507,13 +517,13 @@ int main(int argc, char* argv[])
                             }
 
                             // Encrypt the symmetric key
-                            CryptoPP::byte symm_buf[128];
+                            CryptoPP::byte ciphersymm[128];
                             CryptoPP::RSAES_OAEP_SHA_Encryptor pub_e(users[user_num].publicKey);
-                            CryptoPP::StringSource symss(users[user_num].symKey, 16, true, new CryptoPP::PK_EncryptorFilter(rng, pub_e, new CryptoPP::ArraySink(symm_buf, 128)));//CryptoPP::StringSink(ciphertext)));
-
+                            CryptoPP::StringSource symss(users[user_num].symKey, CryptoPP::AES::DEFAULT_KEYLENGTH, true, new CryptoPP::PK_EncryptorFilter(rng, pub_e, new CryptoPP::ArraySink(ciphersymm, 128)));//StringSink(ciphertext)));
+                            
                             request.code = 103;
                             request.size = sizeof out_message + ciphertext.size();
-                            out_message.size = ciphertext.size();
+                            out_message.size = 128;
                             out_message.type = 2;
                             out_message.uuid_to = users[user_num].uuid;
 
@@ -524,12 +534,14 @@ int main(int argc, char* argv[])
                             buffers.push_back(boost::asio::buffer(&out_message.uuid_to, 16));
                             buffers.push_back(boost::asio::buffer(&out_message.type, 1));
                             buffers.push_back(boost::asio::buffer(&out_message.size, 4));
-                            buffers.push_back(boost::asio::buffer(&symm_buf, 128));
+                            buffers.push_back(boost::asio::buffer(&ciphersymm, 128));
                             boost::asio::write(s, buffers);
                             boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
-
-                            if(response_header.code == 1003)
-                                std::cout << "Symmetric key sent." << std::endl;
+                            
+                            if (response_header.code == 1003) {
+                                boost::asio::read(s, boost::asio::buffer(&sent_response, sizeof sent_response));
+                                std::cout << "Symmetric key sent - " << sent_response.id << std::endl;
+                            }
                         }
 
                         break;
