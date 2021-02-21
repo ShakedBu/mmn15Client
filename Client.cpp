@@ -72,22 +72,22 @@ int main(int argc, char* argv[])
 
         // Not changing between loops
         boost::uuids::uuid uuid;
-        std::vector<User> users;
+        vector<User> users;
 
         // Files
         boost::filesystem::path userfile("me.info");
         ofstream myfile;
         ifstream myfile_i;
 
-        // General
-        std::vector<boost::asio::const_buffer> buffers;
+        // General variables
+        vector<boost::asio::const_buffer> buffers;
         Request request;
         string action;
         ResponseHeader response_header;
         char message[max_length];
         int user_num;
 
-        // Registration
+        // Registration 
         char user[max_user_length];
         string userName;
         string uuid_str;
@@ -99,15 +99,14 @@ int main(int argc, char* argv[])
         // Message sending
         SentResponse sent_response;
         OutMessage out_message;
+        CryptoPP::byte messageb[max_length];
 
         // Waiting messages
         InMessageHeader in_message;
-        char* message_content;
-
-        PublicKeyResponse public_key;
-        SymmKeyResponse symm_key;
 
         // Keys
+        PublicKeyResponse public_key;
+        SymmKeyResponse symm_key;
 
         // Create RSA Keys
         CryptoPP::AutoSeededRandomPool rng;
@@ -129,6 +128,7 @@ int main(int argc, char* argv[])
 
         string ciphertext;
         string plaintext;
+        string decryptedtext;
 
         // Get instructions from user
         while (true) {
@@ -138,30 +138,31 @@ int main(int argc, char* argv[])
             memset(&response_header, 0, sizeof response_header);
             memset(&users_list, 0, sizeof users_list);
             memset(&sent_response, 0, sizeof sent_response);
+            memset(&messageb, 0, sizeof messageb);
             buffers.clear();
             action.clear();
             ciphertext.clear();
             plaintext.clear();
+            decryptedtext.clear();
             request.version_ = 1;
 
             if (!uuid.is_nil())
                 std::copy(uuid.begin(), uuid.end(), request.clientId);
 
-            std::cout << std::endl << "MessageU client at your service! " << std::endl <<
-                "1) Register" << std::endl <<
-                "2) Request for client list" << std::endl <<
-                "3) Request for public key" << std::endl <<
-                "4) Request for waiting messages" << std::endl <<
-                "5) Send a text message" << std::endl <<
-                "51) Send a request for symmetric key" << std::endl <<
-                "52) Send your semmetric key" << std::endl <<
-                "0) Exit client" << std::endl;
-
-            std::getline(std::cin, action);
+            cout << endl << "MessageU client at your service! " << endl <<
+                "1) Register" << endl <<
+                "2) Request for client list" << endl <<
+                "3) Request for public key" << endl <<
+                "4) Request for waiting messages" << endl <<
+                "5) Send a text message" << endl <<
+                "51) Send a request for symmetric key" << endl <<
+                "52) Send your semmetric key" << endl <<
+                "0) Exit client" << endl;
+            getline(cin, action);
 
             try
             {
-                switch (std::stoi(action))
+                switch (stoi(action))
                 {
                     case Exit:
                         s.close();
@@ -171,27 +172,19 @@ int main(int argc, char* argv[])
                     case Register:
                         // Check wether user is already registered
                         if (boost::filesystem::exists(userfile)){
-                            std::cout << "You are already registered." << std::endl;
-                            // If not the same run that registered - get uuid from file
-                            if (uuid.is_nil()) {
-                                myfile_i.open("me.info");
-                                std::getline(myfile_i, userName);
-                                std::getline(myfile_i, uuid_str);
-                                myfile_i.close();
-                                uuid = boost::lexical_cast<boost::uuids::uuid>(uuid_str);
-                            }
+                            cout << "file me.info already exsits." << endl;
                             break;
                         }
 
                         // Get user name and register user
-                        std::cout << "Enter your name: ";
-                        std::cin.getline(user, max_user_length);
+                        cout << "Enter your name: ";
+                        cin.getline(user, max_user_length);
                     
-                        // Send to server
                         request.paylod = user;
                         request.code = 100;
                         request.size = strlen(user) + 160;
-
+                        
+                        // Send to server
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
@@ -206,23 +199,26 @@ int main(int argc, char* argv[])
                             uuid = register_response.uuid;
                             uuid_str = boost::uuids::to_string(uuid);
                             myfile.open("me.info");
-                            myfile << user << std::endl << uuid_str;
+                            myfile << user << endl << uuid_str << endl << buf;
                             myfile.close();
+
+                            cout << "Registered!" << endl;
                         }
                         else {
-                            std::cout << "Error registering" << std::endl;
+                            cout << "Error registering" << endl;
                         }
                         break;
 
                     case ClientList:
                         if (!boost::filesystem::exists(userfile)) {
-                            std::cout << "You need to register first." << std::endl;
+                            cout << "You need to register first." << endl;
                             break;
                         }
 
                         request.code = 101;
                         request.size = 0;
 
+                        // Send to server
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
@@ -230,14 +226,15 @@ int main(int argc, char* argv[])
                         boost::asio::write(s, buffers);
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
 
-                        if (response_header.code == 1001 && response_header.size > 0) {
+                        if (response_header.code == 1001) {
                             user_num = response_header.size / (16 + 255);
-                            std::cout << "Clients list:" << std::endl;
+                            cout << "Clients list:" << endl;
                             users.clear();
 
                             // Go over the clients and print them
                             for (size_t i = 0; i < user_num; i++)
                             {
+                                // Get another client
                                 boost::asio::read(s, boost::asio::buffer(&users_list, sizeof users_list));
 
                                 User new_user;
@@ -248,36 +245,40 @@ int main(int argc, char* argv[])
                                 users.push_back(new_user);
 
                                 uuid_str = boost::uuids::to_string(new_user.uuid);
-                                std::cout << (i+1) << ". " << uuid_str.c_str() << " " << new_user.clientName << std::endl;
+                                cout << (i+1) << ". " << uuid_str.c_str() << " " << new_user.clientName << endl;
                             }
+                        }
+                        else {
+                            cout << "Error getting client list" << endl;
                         }
 
                         break;
 
                     case GetPublicKey:
                         if (!boost::filesystem::exists(userfile)) {
-                            std::cout << "You need to register first." << std::endl;
+                            cout << "You need to register first." << endl;
                             break;
                         }
 
-                        std::cout << "Whose public key would you like to request? (enter index)";
-                        std::getline(std::cin, action);
-                        user_num = std::stoi(action);
+                        cout << "Whose public key would you like to request? (enter index)";
+                        getline(cin, action);
+                        user_num = stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > users.size()){
-                            std::cout << "no such user!" << std::endl;
+                        if (user_num < 0 || user_num >= users.size()){
+                            cout << "no such user!" << endl;
+                            break;
                         }
 
-                        if (users[user_num].hasPublic)
-                        {
-                            std::cout << "you already have this user's public key." << std::endl;
+                        if (users[user_num].hasPublic){
+                            cout << "you already have this user's public key." << endl;
                             break;
                         }
 
                         request.code = 102;
                         request.size = 0;
 
+                        // send to server
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
@@ -300,17 +301,21 @@ int main(int argc, char* argv[])
                                 }
                             }
                         }
+                        else {
+                            cout << "Error getting public key" << endl;
+                        }
 
                         break;
 
                     case WaitingMessages:
                         if (!boost::filesystem::exists(userfile)) {
-                            std::cout << "You need to register first." << std::endl;
+                            cout << "You need to register first." << endl;
                             break;
                         }
                         request.code = 104;
                         request.size = 0;
 
+                        // send to server
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
@@ -318,10 +323,10 @@ int main(int argc, char* argv[])
                         boost::asio::write(s, buffers);
                         boost::asio::read(s, boost::asio::buffer(&response_header, sizeof response_header));
 
-                        if (response_header.code == 1004 && response_header.size > 0) {
+                        if (response_header.code == 1004) {
                             int left = response_header.size;
 
-                            std::cout << "Waiting messages: " << std::endl;
+                            cout << "Waiting messages: " << endl;
 
                             while (left > 0) {
                                 // Go over messages.
@@ -334,80 +339,72 @@ int main(int argc, char* argv[])
                                         break;
                                     }
                                 }                             
-                                CryptoPP::byte messageb[128];
 
                                 if (in_message.size > 0) {
                                     boost::asio::read(s, boost::asio::buffer(&messageb, in_message.size));
                                 }
 
                                 switch (in_message.type) {
-                                case 1:
-                                    std::cout << "From: " << users[user_num].clientName << std::endl <<
-                                        "Request for symmetric key" << std::endl;
-                                    break;
-                                case 2:
-                                    {
-                                        // Get other user's symmetric key
-                                        std::string decrypted;
-                                        CryptoPP::StringSource symmss(messageb, in_message.size, true, new CryptoPP::PK_DecryptorFilter(rng, priv_d, new CryptoPP::ArraySink(users[user_num].symKey, 16)));//new CryptoPP::StringSink(decrypted)));
-                                        users[user_num].hasSymm = true;
+                                    case 1:
+                                        cout << "From: " << users[user_num].clientName << endl << "Request for symmetric key" << endl;
+                                        break;
+                                    case 2:
+                                        {
+                                            // Get other user's symmetric key
+                                            CryptoPP::StringSource symmss(messageb, in_message.size, true, new CryptoPP::PK_DecryptorFilter(rng, priv_d, new CryptoPP::ArraySink(users[user_num].symKey, 16)));
+                                            users[user_num].hasSymm = true;
 
-                                        std::cout << "From: " << users[user_num].clientName << std::endl <<
-                                            "symmetric key received" << std::endl;
-                                    }
-
-                                    break;
-                                case 3:
-                                    {
-                                        std::string decryptedtext;
-                                        if (users[user_num].hasSymm) {
-                                            CryptoPP::AES::Decryption aesDecryption(users[user_num].symKey, CryptoPP::AES::DEFAULT_KEYLENGTH);
-                                            CryptoPP::CBC_Mode_ExternalCipher::Decryption cbcDecryption(aesDecryption, iv);
-
-                                            CryptoPP::StreamTransformationFilter stfDecryptor(cbcDecryption, new CryptoPP::StringSink(decryptedtext));
-                                            stfDecryptor.Put(messageb, in_message.size);
-                                            stfDecryptor.MessageEnd();
-
-                                            std::cout << "From: " << users[user_num].clientName << std::endl <<
-                                                "Content:" << std::endl << decryptedtext << std::endl;
+                                            cout << "From: " << users[user_num].clientName << endl << "symmetric key received" << endl;
                                         }
-                                        else {
-                                            std::cout << "From: " << users[user_num].clientName << std::endl <<
-                                                "Content:" << std::endl << "No symmetric key" << std::endl;
+                                        break;
+                                    case 3:
+                                        {
+                                            if (users[user_num].hasSymm) {
+                                                CryptoPP::AES::Decryption aesDecryption(users[user_num].symKey, CryptoPP::AES::DEFAULT_KEYLENGTH);
+                                                CryptoPP::CBC_Mode_ExternalCipher::Decryption cbcDecryption(aesDecryption, iv);
+                                                CryptoPP::StreamTransformationFilter stfDecryptor(cbcDecryption, new CryptoPP::StringSink(decryptedtext));
+                                                stfDecryptor.Put(messageb, in_message.size);
+                                                stfDecryptor.MessageEnd();
+
+                                                cout << "From: " << users[user_num].clientName << endl << "Content:" << endl << decryptedtext << endl;
+                                            }
+                                            else {
+                                                cout << "From: " << users[user_num].clientName << endl << "Content:" << endl << "No symmetric key" << endl;
+                                            }
                                         }
-                                    }
-                                    break;
+                                        break;
                                 }
-
                                 left = left - sizeof in_message - in_message.size;
                             }
-
+                        }
+                        else {
+                            cout << "Error reading messages" << endl;
                         }
                         break;
 
                     case SendTextMessage:
                         if (!boost::filesystem::exists(userfile)) {
-                            std::cout << "You need to register first." << std::endl;
+                            cout << "You need to register first." << endl;
                             break;
                         }
-                        std::cout << "To whom would you like to send a message? (enter index)";
-                        std::getline(std::cin, action);
-                        user_num = std::stoi(action);
+
+                        cout << "To whom would you like to send a message? (enter index)";
+                        getline(cin, action);
+                        user_num = stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > users.size()) {
-                            std::cout << "no such user!" << std::endl;
+                        if (user_num < 0 || user_num >= users.size()) {
+                            cout << "no such user!" << endl;
                             break;
                         }
 
                         if (!users[user_num].hasSymm) {
-                            std::cout << "no symmetric key for that user!" << std::endl;
+                            cout << "no symmetric key for that user!" << endl;
                             break;
                         }
                         else {
-                            std::cout << "Enter the message to be sent: " << std::endl;
-                            //std::cin.getline(message, max_length);
-                            std::getline(std::cin, plaintext);
+                            cout << "Enter the message to be sent: " << endl;
+                            getline(cin, plaintext);
 
                             int size;
 
@@ -430,6 +427,7 @@ int main(int argc, char* argv[])
                             out_message.type = 3;
                             out_message.uuid_to = users[user_num].uuid;
 
+                            // send to server
                             buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                             buffers.push_back(boost::asio::buffer(&request.version_, 1));
                             buffers.push_back(boost::asio::buffer(&request.code, 1));
@@ -444,24 +442,26 @@ int main(int argc, char* argv[])
                             if (response_header.code == 1003 && response_header.size > 0) {
                                 // Read message id
                                 boost::asio::read(s, boost::asio::buffer(&sent_response, sizeof sent_response));
-                                std::cout << "Message sent - " << sent_response.id << std::endl;
+                                cout << "Message sent - " << sent_response.id << endl;
+                            }
+                            else {
+                                cout << "Error sending message" << endl;
                             }
                         }
-
                         break;
 
                     case RequestKey:
                         if (!boost::filesystem::exists(userfile)) {
-                            std::cout << "You need to register first." << std::endl;
+                            cout << "You need to register first." << endl;
                             break;
                         }
-                        std::cout << "From whom would you like to request a symmetric key? (enter index)";
-                        std::getline(std::cin, action);
-                        user_num = std::stoi(action);
+                        cout << "From whom would you like to request a symmetric key? (enter index)";
+                        getline(cin, action);
+                        user_num = stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > users.size()) {
-                            std::cout << "no such user!" << std::endl;
+                        if (user_num < 0 || user_num >= users.size()) {
+                            cout << "no such user!" << endl;
                             break;
                         }
 
@@ -471,6 +471,7 @@ int main(int argc, char* argv[])
                         out_message.type = 1;
                         out_message.uuid_to = users[user_num].uuid;
 
+                        // send to server
                         buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                         buffers.push_back(boost::asio::buffer(&request.version_, 1));
                         buffers.push_back(boost::asio::buffer(&request.code, 1));
@@ -483,28 +484,30 @@ int main(int argc, char* argv[])
 
                         if (response_header.code == 1003 && response_header.size > 0) {
                             boost::asio::read(s, boost::asio::buffer(&sent_response, sizeof sent_response));
-                            std::cout << "Symmetric key requested - " << sent_response.id << std::endl;
+                            cout << "Symmetric key requested - " << sent_response.id << endl;
                         }
-
+                        else {
+                            cout << "Error requesting key" << endl;
+                        }
                         break;
 
                     case SendKey:
                         if (!boost::filesystem::exists(userfile)) {
-                            std::cout << "You need to register first." << std::endl;
+                            cout << "You need to register first." << endl;
                             break;
                         }
-                        std::cout << "To whom would you like to send a symmetric key? (enter index)";
-                        std::getline(std::cin, action);
-                        user_num = std::stoi(action);
+                        cout << "To whom would you like to send a symmetric key? (enter index)";
+                        getline(cin, action);
+                        user_num = stoi(action);
                         user_num -= 1;
 
-                        if (user_num < 0 || user_num > users.size()) {
-                            std::cout << "no such user!" << std::endl;
+                        if (user_num < 0 || user_num >= users.size()) {
+                            cout << "no such user!" << endl;
                             break;
                         }
 
                         else if (!users[user_num].hasPublic) {
-                            std::cout << "no public key for that user!" << std::endl;
+                            cout << "no public key for that user!" << endl;
                             break;
                         }
                         else {
@@ -519,7 +522,7 @@ int main(int argc, char* argv[])
                             // Encrypt the symmetric key
                             CryptoPP::byte ciphersymm[128];
                             CryptoPP::RSAES_OAEP_SHA_Encryptor pub_e(users[user_num].publicKey);
-                            CryptoPP::StringSource symss(users[user_num].symKey, CryptoPP::AES::DEFAULT_KEYLENGTH, true, new CryptoPP::PK_EncryptorFilter(rng, pub_e, new CryptoPP::ArraySink(ciphersymm, 128)));//StringSink(ciphertext)));
+                            CryptoPP::StringSource symss(users[user_num].symKey, CryptoPP::AES::DEFAULT_KEYLENGTH, true, new CryptoPP::PK_EncryptorFilter(rng, pub_e, new CryptoPP::ArraySink(ciphersymm, 128)));
                             
                             request.code = 103;
                             request.size = sizeof out_message + ciphertext.size();
@@ -527,6 +530,7 @@ int main(int argc, char* argv[])
                             out_message.type = 2;
                             out_message.uuid_to = users[user_num].uuid;
 
+                            // send to server
                             buffers.push_back(boost::asio::buffer(&request.clientId, user_id_length));
                             buffers.push_back(boost::asio::buffer(&request.version_, 1));
                             buffers.push_back(boost::asio::buffer(&request.code, 1));
@@ -540,26 +544,26 @@ int main(int argc, char* argv[])
                             
                             if (response_header.code == 1003) {
                                 boost::asio::read(s, boost::asio::buffer(&sent_response, sizeof sent_response));
-                                std::cout << "Symmetric key sent - " << sent_response.id << std::endl;
+                                cout << "Symmetric key sent - " << sent_response.id << endl;
+                            }
+                            else {
+                                cout << "Error sending key" << endl;
                             }
                         }
-
                         break;
 
                     default:
-                        std::cout << "Please enter a valid number." << std::endl;
+                        cout << "Please enter a valid number." << endl;
                         break;
                 }
             }
-            catch (std::exception& e)
-            {
-                std::cerr << "server responded with an error" << std::endl << e.what() << std::endl;
+            catch (exception& e){
+                cerr << "server responded with an error" << endl << e.what() << endl;
             }
         }
     }
-    catch (std::exception& e)
-    {
-        std::cerr << "Error: " << e.what() << std::endl;
+    catch (exception& e){
+        cerr << "Error: " << e.what() << endl;
     }
 
     return 0;
